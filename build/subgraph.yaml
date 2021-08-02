@@ -1,6 +1,6 @@
 specVersion: 0.0.2
 schema:
-  file: ./schema.graphql
+  file: schema.graphql
 dataSources:
   - kind: ethereum/contract
     name: TournamentV1
@@ -26,7 +26,7 @@ dataSources:
         - Unpaused
       abis:
         - name: TournamentV1
-          file: ./abis/TournamentV1.json
+          file: TournamentV1/abis/TournamentV1.json
       eventHandlers:
         - event: BetScore(indexed uint256,indexed address,uint32,uint256)
           handler: handleBetScore
@@ -52,4 +52,4 @@ dataSources:
           handler: handleMinimumBetAmountUpdated
         - event: Unpaused(address)
           handler: handleUnpaused
-      file: ./src/mapping.ts
+      file: TournamentV1/TournamentV1.wasm

@@ -1,10 +1,10 @@
 {
-  "name": "crcyto-v1-test1",
+  "name": "crycto-test-v01",
   "license": "UNLICENSED",
   "scripts": {
     "codegen": "graph codegen",
     "build": "graph build",
-    "deploy": "graph deploy --node https://api.thegraph.com/deploy/ shrinivas-s/crcyto-v1-test1",
+    "deploy": "graph deploy --studio crycto-test-v01",
     "create-local": "graph create --node http://localhost:8020/ shrinivas-s/crcyto-v1-test1",
     "remove-local": "graph remove --node http://localhost:8020/ shrinivas-s/crcyto-v1-test1",
     "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 shrinivas-s/crcyto-v1-test1"

@@ -1,6 +1,6 @@
-import { BigInt } from "@graphprotocol/graph-ts"
+import { BigInt, BigDecimal, log } from "@graphprotocol/graph-ts";
 import {
-  Contract,
+  TournamentV1,
   BetScore,
   Claim,
   ClaimTreasury,
@@ -11,98 +11,191 @@ import {
   Paused,
   Refund,
   RewardRateUpdated,
-  RoleAdminChanged,
-  RoleGranted,
-  RoleRevoked,
-  Unpaused
-} from "../generated/Contract/Contract"
-import { ExampleEntity } from "../generated/schema"
+  MinimumBetAmountUpdated,
+  Unpaused,
+} from "../generated/TournamentV1/TournamentV1";
+import { Tournament, Match, Bet, Position } from "../generated/schema";
 
-export function handleBetScore(event: BetScore): void {
-  // Entities can be loaded from the store using a string ID; this ID
-  // needs to be unique across all entities of the same type
-  let entity = ExampleEntity.load(event.transaction.from.toHex())
+const CREATED = "Created",
+  COMPLETED = "Completed",
+  FORFEITED = "Forfeited";
 
-  // Entities only exist after they have been saved to the store;
-  // `null` checks allow to create entities on demand
-  if (entity == null) {
-    entity = new ExampleEntity(event.transaction.from.toHex())
+const ZERO_BI = BigInt.fromI32(0);
+const ONE_BI = BigInt.fromI32(1);
+const ZERO_BD = BigDecimal.fromString("0");
+const EIGHTEEN_BD = BigDecimal.fromString("1e18");
 
-    // Entity fields can be set using simple assignments
-    entity.count = BigInt.fromI32(0)
-  }
+let BASE_REWARD_RATE = BigInt.fromI32(90);
+let BASE_MIN_BET_AMOUNT = BigDecimal.fromString("0.01");
 
-  // BigInt and BigDecimal math are supported
-  entity.count = entity.count + BigInt.fromI32(1)
+const divDecimalBD = (val: BigInt): BigDecimal => val.divDecimal(EIGHTEEN_BD);
 
-  // Entity fields can be set based on event parameters
-  entity.matchId = event.params.matchId
-  entity.sender = event.params.sender
-
-  // Entities can be written to the store with `.save()`
-  entity.save()
-
-  // Note: If a handler doesn't require existing field values, it is faster
-  // _not_ to load the entity from the store. Instead, create it fresh with
-  // `new Entity(...)`, set the fields that should be updated and save the
-  // entity back to the store. Fields that were not set or unset remain
-  // unchanged, allowing for partial updates to be applied.
-
-  // It is also possible to access smart contracts from mappings. For
-  // example, the contract that has emitted the event can be connected to
-  // with:
-  //
-  // let contract = Contract.bind(event.address)
-  //
-  // The following functions can then be called on this contract to access
-  // state variables and other data:
-  //
-  // - contract.DEFAULT_ADMIN_ROLE(...)
-  // - contract.MIN_BET_AMOUNT(...)
-  // - contract.TOTAL_RATE(...)
-  // - contract.UMPIRE_ROLE(...)
-  // - contract.getRoleAdmin(...)
-  // - contract.getRoleMember(...)
-  // - contract.getRoleMemberCount(...)
-  // - contract.hasRole(...)
-  // - contract.matches(...)
-  // - contract.paused(...)
-  // - contract.president(...)
-  // - contract.rewardRate(...)
-  // - contract.supportsInterface(...)
-  // - contract.treasuryAmount(...)
-  // - contract.createMatch(...)
-  // - contract.claimable(...)
-  // - contract.getRewardMultiplier(...)
-  // - contract.isHouseWin(...)
-  // - contract.getMatchCount(...)
-  // - contract.getBetsAtScore(...)
-  // - contract.isDeadlinePassed(...)
-  // - contract.getUserMatches(...)
+export function handleMatchCreated(event: MatchCreated): void {
+  const match = new Match(event.params.matchId.toHex());
+  match.umpire = event.params.umpire;
+  match.uri = event.params.uri;
+  match.minScore = event.params.minScore;
+  match.scoreMultiple = event.params.scoreMultiple;
+  match.deadline = event.params.deadline;
+  match.rewardRate = BigInt.fromI32(event.params.rewardRate);
+  match.totalBets = ZERO_BI;
+  match.totalAmount = ZERO_BD;
+  match.rewardAmount = ZERO_BD;
+  match.treasuryAmount = ZERO_BD;
+  match.stage = CREATED;
+  match.save();
 }
 
-export function handleClaim(event: Claim): void {}
+export function handleDeadlineUpdated(event: DeadlineUpdated): void {
+  const match = Match.load(event.params.matchId.toHex());
+  if (match === null) {
+    log.error(
+      "Tried to update deadline without an existing match (match id : {})",
+      [event.params.matchId.toString()]
+    );
+  }
+  match.deadline = event.params.deadline;
+  match.save();
+}
 
-export function handleClaimTreasury(event: ClaimTreasury): void {}
+export function handleMatchForfeited(event: MatchForfeited): void {
+  const match = new Match(event.params.matchId.toHex());
+  match.stage = FORFEITED;
+  match.save();
+}
 
-export function handleDeadlineUpdated(event: DeadlineUpdated): void {}
+export function handleMatchCompleted(event: MatchCompleted): void {
+  const match = Match.load(event.params.matchId.toHex());
+  if (match === null) {
+    log.error("Tried to end match without an existing match (match id : {})", [
+      event.params.matchId.toString(),
+    ]);
+  }
+  match.umpire = event.params.umpire;
+  match.winningScore = event.params.winningScore;
+  match.rewardAmount = divDecimalBD(event.params.rewardAmount);
+  match.treasuryAmount = divDecimalBD(event.params.treasuryAmount);
+  /** Syncing totalAmount from match end event **/
+  match.totalAmount = match.rewardAmount.plus(match.treasuryAmount);
+  match.stage = COMPLETED;
+  match.save();
 
-export function handleMatchCompleted(event: MatchCompleted): void {}
+  const tournament = getTournament();
+  tournament.rewardAmount = tournament.rewardAmount.plus(match.rewardAmount);
+  tournament.treasuryAmount = tournament.treasuryAmount.plus(
+    match.treasuryAmount
+  );
+  tournament.totalAmount = tournament.totalAmount.plus(match.totalAmount);
+  tournament.totalBets = tournament.totalBets.plus(match.totalBets);
+  tournament.save();
+}
 
-export function handleMatchCreated(event: MatchCreated): void {}
+export function handleBetScore(event: BetScore): void {
+  const betId =
+    event.params.sender.toHex() + "-" + event.params.matchId.toHex();
+  const bet = new Bet(betId);
+  bet.match = event.params.matchId.toHex();
+  bet.sender = event.params.sender;
+  bet.score = event.params.score;
+  bet.amount = divDecimalBD(event.params.amount);
+  bet.claimed = false;
+  bet.refunded = false;
 
-export function handleMatchForfeited(event: MatchForfeited): void {}
+  bet.save();
 
-export function handlePaused(event: Paused): void {}
+  const positionId =
+    event.params.matchId.toHex() + "-" + event.params.score.toHex();
+  let position = Position.load(positionId);
+  if (position == null) {
+    position = new Position(positionId);
+    position.match = event.params.matchId.toHex();
+    position.score = event.params.score;
+    position.bets = ZERO_BI;
+    position.amount = ZERO_BD;
+  }
+  position.bets = position.bets.plus(ONE_BI);
+  position.amount = position.amount.plus(divDecimalBD(event.params.amount));
+  position.save();
 
-export function handleRefund(event: Refund): void {}
+  let match = Match.load(event.params.matchId.toHex());
+  match.totalBets = match.totalBets.plus(ONE_BI);
 
-export function handleRewardRateUpdated(event: RewardRateUpdated): void {}
+  //Updating for real time data. Will be recalculated on MatchCompleted event trigger
+  match.totalAmount = match.totalAmount.plus(divDecimalBD(event.params.amount));
 
-export function handleRoleAdminChanged(event: RoleAdminChanged): void {}
+  match.save();
+}
 
-export function handleRoleGranted(event: RoleGranted): void {}
+export function handleClaim(event: Claim): void {
+  const betId =
+    event.params.sender.toHex() + "-" + event.params.matchId.toHex();
+  let bet = Bet.load(betId);
+  if (bet === null) {
+    log.error("Tried to query bet after claim (betId : {})", [betId]);
+  }
+  bet.claimed = true;
+  bet.claimedAmount = divDecimalBD(event.params.amount);
+  bet.save();
+}
 
-export function handleRoleRevoked(event: RoleRevoked): void {}
+export function handleRefund(event: Refund): void {
+  const betId =
+    event.params.sender.toHex() + "-" + event.params.matchId.toHex();
+  let bet = Bet.load(betId);
+  if (bet === null) {
+    log.error("Tried to query bet after refund (betId : {})", [betId]);
+  }
+  bet.refunded = true;
+  bet.refundedAmount = divDecimalBD(event.params.amount);
+  bet.save();
+}
 
-export function handleUnpaused(event: Unpaused): void {}
+export function handleClaimTreasury(event: ClaimTreasury): void {
+  let tournament = getTournament();
+  tournament.claimedTreasuryAmount = tournament.claimedTreasuryAmount.plus(
+    divDecimalBD(event.params.amount)
+  );
+  tournament.save();
+}
+
+export function handleRewardRateUpdated(event: RewardRateUpdated): void {
+  let tournament = getTournament();
+  tournament.rewardRate = BigInt.fromI32(event.params.rewardRate);
+  tournament.save();
+}
+
+export function handleMinimumBetAmountUpdated(
+  event: MinimumBetAmountUpdated
+): void {
+  let tournament = getTournament();
+  tournament.minBetAmount = divDecimalBD(event.params.minBetAmount);
+  tournament.save();
+}
+
+export function handlePaused(event: Paused): void {
+  let tournament = getTournament();
+  tournament.paused = true;
+  tournament.save();
+}
+
+export function handleUnpaused(event: Unpaused): void {
+  let tournament = getTournament();
+  tournament.paused = false;
+  tournament.save();
+}
+
+const getTournament = (): Tournament | null => {
+  let tournament: Tournament | null = Tournament.load("1");
+  if (tournament == null) {
+    tournament = new Tournament("1");
+    tournament.paused = false;
+    tournament.minBetAmount = BASE_MIN_BET_AMOUNT;
+    tournament.rewardRate = BASE_REWARD_RATE;
+    tournament.totalBets = ZERO_BI;
+    tournament.totalAmount = ZERO_BD;
+    tournament.rewardAmount = ZERO_BD;
+    tournament.treasuryAmount = ZERO_BD;
+    tournament.claimedTreasuryAmount = ZERO_BD;
+  }
+  return tournament;
+};
