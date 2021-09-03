@@ -76,7 +76,7 @@ export function handleMatchCompleted(event: MatchCompleted): void {
   match.rewardAmount = divDecimalBD(event.params.rewardAmount);
   match.treasuryAmount = divDecimalBD(event.params.treasuryAmount);
   /** Syncing totalAmount from match end event **/
-  match.totalAmount = match.rewardAmount.plus(match.treasuryAmount);
+  // match.totalAmount = match.rewardAmount.plus(match.treasuryAmount);
   match.stage = COMPLETED;
   match.save();
 

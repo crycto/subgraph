@@ -4,10 +4,11 @@ schema:
 dataSources:
   - kind: ethereum/contract
     name: TournamentV1
-    network: mainnet
+    network: mumbai
     source:
-      address: "0xD24F60FA032fF0f75E2Ca3066B882a5D6BFEeDec"
+      address: "0x3A897FAdA04EB55C6F78635f6e3086aA7192025b"
       abi: TournamentV1
+      startBlock: 17118934
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.4
