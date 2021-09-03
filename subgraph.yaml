@@ -4,9 +4,9 @@ schema:
 dataSources:
   - kind: ethereum/contract
     name: TournamentV1
-    network: mumbai
+    network: matic
     source:
-      address: "0x3A897FAdA04EB55C6F78635f6e3086aA7192025b"
+      address: "0xc0C620EB55290A114ADA5397ed3e80C040b34604"
       abi: TournamentV1
       startBlock: 17118934
     mapping:
